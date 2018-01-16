@@ -1,36 +1,39 @@
-package fr.xephi.authme.data;
+package fr.xephi.authme.data.captcha;
 
 import fr.xephi.authme.ReflectionTestUtils;
 import fr.xephi.authme.settings.Settings;
 import fr.xephi.authme.settings.properties.SecuritySettings;
 import fr.xephi.authme.util.expiring.TimedCounter;
+import org.bukkit.entity.Player;
 import org.junit.Test;
 
+import static fr.xephi.authme.AuthMeMatchers.stringWithLength;
 import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.not;
 import static org.junit.Assert.assertThat;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
 
 /**
- * Test for {@link CaptchaManager}.
+ * Test for {@link LoginCaptchaManager}.
  */
-public class CaptchaManagerTest {
+public class LoginCaptchaManagerTest {
 
     @Test
     public void shouldAddCounts() {
         // given
         Settings settings = mockSettings(3, 4);
-        CaptchaManager manager = new CaptchaManager(settings);
+        LoginCaptchaManager manager = new LoginCaptchaManager(settings);
         String player = "tester";
 
         // when
         for (int i = 0; i < 2; ++i) {
-            manager.increaseCount(player);
+            manager.increaseLoginFailureCount(player);
         }
 
         // then
         assertThat(manager.isCaptchaRequired(player), equalTo(false));
-        manager.increaseCount(player);
+        manager.increaseLoginFailureCount(player);
         assertThat(manager.isCaptchaRequired(player.toUpperCase()), equalTo(true));
         assertThat(manager.isCaptchaRequired("otherPlayer"), equalTo(false));
     }
@@ -38,21 +41,40 @@ public class CaptchaManagerTest {
     @Test
     public void shouldCreateAndCheckCaptcha() {
         // given
-        String player = "Miner";
+        String name = "Miner";
+        Player player = mock(Player.class);
+        given(player.getName()).willReturn(name);
         Settings settings = mockSettings(1, 4);
-        CaptchaManager manager = new CaptchaManager(settings);
-        String captchaCode = manager.getCaptchaCodeOrGenerateNew(player);
+        LoginCaptchaManager manager = new LoginCaptchaManager(settings);
+        String captchaCode = manager.getCaptchaCodeOrGenerateNew(name);
 
         // when
-        boolean badResult = manager.checkCode(player, "wrong_code");
-        boolean goodResult = manager.checkCode(player, captchaCode);
+        boolean result = manager.checkCode(player, captchaCode);
 
         // then
-        assertThat(captchaCode.length(), equalTo(4));
-        assertThat(badResult, equalTo(false));
-        assertThat(goodResult, equalTo(true));
-        // Supplying correct code should clear the entry, and any code should be valid if no entry is present
-        assertThat(manager.checkCode(player, "bogus"), equalTo(true));
+        assertThat(captchaCode, stringWithLength(4));
+        assertThat(result, equalTo(true));
+        // Supplying correct code should clear the entry, and a code should be invalid if no entry is present
+        assertThat(manager.checkCode(player, "bogus"), equalTo(false));
+    }
+
+    @Test
+    public void shouldGenerateNewCodeOnFailure() {
+        // given
+        String name = "Tarheel";
+        Player player = mock(Player.class);
+        given(player.getName()).willReturn(name);
+        Settings settings = mockSettings(1, 9);
+        LoginCaptchaManager manager = new LoginCaptchaManager(settings);
+        String captchaCode = manager.getCaptchaCodeOrGenerateNew(name);
+
+        // when
+        boolean result = manager.checkCode(player, "wrongcode");
+
+        // then
+        assertThat(captchaCode, stringWithLength(9));
+        assertThat(result, equalTo(false));
+        assertThat(manager.getCaptchaCodeOrGenerateNew(name), not(equalTo(captchaCode)));
     }
 
     @Test
@@ -60,7 +82,7 @@ public class CaptchaManagerTest {
         // given
         String player = "Tester";
         Settings settings = mockSettings(1, 5);
-        CaptchaManager manager = new CaptchaManager(settings);
+        LoginCaptchaManager manager = new LoginCaptchaManager(settings);
 
         // when
         String code1 = manager.getCaptchaCodeOrGenerateNew(player);
@@ -78,18 +100,18 @@ public class CaptchaManagerTest {
         // given
         String player = "plaYer";
         Settings settings = mockSettings(2, 3);
-        CaptchaManager manager = new CaptchaManager(settings);
+        LoginCaptchaManager manager = new LoginCaptchaManager(settings);
 
         // when
-        manager.increaseCount(player);
-        manager.increaseCount(player);
+        manager.increaseLoginFailureCount(player);
+        manager.increaseLoginFailureCount(player);
 
         // then
         assertThat(manager.isCaptchaRequired(player), equalTo(true));
         assertHasCount(manager, player, 2);
 
         // when 2
-        manager.resetCounts(player);
+        manager.resetLoginFailureCount(player);
 
         // then 2
         assertThat(manager.isCaptchaRequired(player), equalTo(false));
@@ -101,11 +123,11 @@ public class CaptchaManagerTest {
         // given
         String player = "someone_";
         Settings settings = mockSettings(1, 3);
-        given(settings.getProperty(SecuritySettings.USE_CAPTCHA)).willReturn(false);
-        CaptchaManager manager = new CaptchaManager(settings);
+        given(settings.getProperty(SecuritySettings.ENABLE_LOGIN_FAILURE_CAPTCHA)).willReturn(false);
+        LoginCaptchaManager manager = new LoginCaptchaManager(settings);
 
         // when
-        manager.increaseCount(player);
+        manager.increaseLoginFailureCount(player);
 
         // then
         assertThat(manager.isCaptchaRequired(player), equalTo(false));
@@ -117,11 +139,11 @@ public class CaptchaManagerTest {
         // given
         String player = "Robert001";
         Settings settings = mockSettings(1, 5);
-        CaptchaManager manager = new CaptchaManager(settings);
-        given(settings.getProperty(SecuritySettings.USE_CAPTCHA)).willReturn(false);
+        LoginCaptchaManager manager = new LoginCaptchaManager(settings);
+        given(settings.getProperty(SecuritySettings.ENABLE_LOGIN_FAILURE_CAPTCHA)).willReturn(false);
 
         // when
-        manager.increaseCount(player);
+        manager.increaseLoginFailureCount(player);
         // assumptions
         assertThat(manager.isCaptchaRequired(player), equalTo(true));
         assertHasCount(manager, player, 1);
@@ -135,16 +157,16 @@ public class CaptchaManagerTest {
 
     private static Settings mockSettings(int maxTries, int captchaLength) {
         Settings settings = mock(Settings.class);
-        given(settings.getProperty(SecuritySettings.USE_CAPTCHA)).willReturn(true);
+        given(settings.getProperty(SecuritySettings.ENABLE_LOGIN_FAILURE_CAPTCHA)).willReturn(true);
         given(settings.getProperty(SecuritySettings.MAX_LOGIN_TRIES_BEFORE_CAPTCHA)).willReturn(maxTries);
         given(settings.getProperty(SecuritySettings.CAPTCHA_LENGTH)).willReturn(captchaLength);
         given(settings.getProperty(SecuritySettings.CAPTCHA_COUNT_MINUTES_BEFORE_RESET)).willReturn(30);
         return settings;
     }
 
-    private static void assertHasCount(CaptchaManager manager, String player, Integer count) {
+    private static void assertHasCount(LoginCaptchaManager manager, String player, Integer count) {
         TimedCounter<String> playerCounts = ReflectionTestUtils
-            .getFieldValue(CaptchaManager.class, manager, "playerCounts");
+            .getFieldValue(LoginCaptchaManager.class, manager, "playerCounts");
         assertThat(playerCounts.get(player.toLowerCase()), equalTo(count));
     }
 }

@@ -122,5 +122,4 @@ public class AuthMeInitializationTest {
         assertThat(injector.getIfAvailable(ProcessSyncPlayerLogin.class), not(nullValue()));
         assertThat(injector.getIfAvailable(PurgeService.class), not(nullValue()));
     }
-
 }
